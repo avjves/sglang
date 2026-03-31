@@ -31,6 +31,7 @@ For SGLang-native pipelines, the CLI accepts the lowercase names of `AttentionBa
 | `vmoba_attn` | `VMOBA_ATTN` | Requires `kernel.attn.vmoba_attn.vmoba`. Configure via `--attention-backend-config`. |
 | `aiter` | `AITER` | Requires `aiter`. |
 | `aiter_sage` | `AITER_SAGE` | Requires `aiter`. |
+| `aiter_sage_v2` | `AITER_SAGE_V2` | Requires `aiter`. Only supports `gfx952`. |
 | `sparse_video_gen_2_attn` | `SPARSE_VIDEO_GEN_2_ATTN` | Requires `svg`. See installation instructions at https://github.com/svg-project/Sparse-VideoGen. |
 
 ## Selection priority
