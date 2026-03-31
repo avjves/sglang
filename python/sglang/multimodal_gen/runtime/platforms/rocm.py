@@ -125,6 +125,16 @@ class RocmPlatform(Platform):
                     dtype,
                 )
 
+        elif selected_backend == AttentionBackendEnum.AITER_SAGE_V2:
+            if dtype in (torch.float16, torch.bfloat16):
+                logger.info("Using AITER Sage V2 backend on ROCm.")
+                return "sglang.multimodal_gen.runtime.layers.attention.backends.aiter_sage_v2.AITERSageV2Backend"
+            else:
+                logger.warning(
+                    "AITER Sage V2 backend only supports bf16/fp16 inputs but got dtype=%s.",
+                    dtype,
+                )
+
         elif selected_backend in (
             AttentionBackendEnum.SLIDING_TILE_ATTN,
             AttentionBackendEnum.SAGE_ATTN,
