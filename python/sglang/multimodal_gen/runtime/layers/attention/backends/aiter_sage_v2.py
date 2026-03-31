@@ -72,6 +72,8 @@ class AITERSageV2Impl(AttentionImpl):
             for i in range(torch.cuda.device_count()):
                 device = torch.device(f"cuda:{i}")
                 self._hadamard[device] = hadamard.to(device)
+        else:
+            self._hadamard[torch.device("cpu")] = hadamard
 
     def forward(
         self,
