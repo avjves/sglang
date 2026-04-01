@@ -1037,6 +1037,11 @@ class DenoisingStage(PipelineStage):
                             )
                         )
 
+                        if server_args.parsed_hybrid_schedule is not None:
+                            server_args.parsed_hybrid_schedule.update_current_backend(
+                                i, num_timesteps
+                            )
+
                         # Expand latents for I2V
                         latent_model_input = latents.to(target_dtype)
                         if batch.image_latent is not None:
@@ -1084,7 +1089,6 @@ class DenoisingStage(PipelineStage):
                             server_args=server_args,
                             guidance=guidance,
                             latents=latents,
-                            total_timesteps=num_timesteps,
                         )
 
                         # Save noise_pred to batch for external access (e.g., ComfyUI)
@@ -1532,7 +1536,6 @@ class DenoisingStage(PipelineStage):
         server_args,
         guidance,
         latents,
-        total_timesteps: int | None = None,
     ):
         """
         Predict the noise residual with classifier-free guidance.
@@ -1553,13 +1556,6 @@ class DenoisingStage(PipelineStage):
         Returns:
             The predicted noise.
         """
-        # Update hybrid attention dispatch tensor outside the compiled region
-        # so dynamo traces it symbolically (graph break via .item(), not recompile).
-        if server_args.parsed_hybrid_schedule is not None:
-            server_args.parsed_hybrid_schedule.update_current_backend(
-                timestep_index, total_timesteps
-            )
-
         noise_pred_cond: torch.Tensor | None = None
         noise_pred_uncond: torch.Tensor | None = None
         cfg_rank = get_classifier_free_guidance_rank()
@@ -1570,7 +1566,6 @@ class DenoisingStage(PipelineStage):
                 current_timestep=timestep_index,
                 attn_metadata=attn_metadata,
                 forward_batch=batch,
-                total_timesteps=total_timesteps,
             ):
                 noise_pred_cond = self._predict_noise(
                     current_model=current_model,
@@ -1595,7 +1590,6 @@ class DenoisingStage(PipelineStage):
                 current_timestep=timestep_index,
                 attn_metadata=attn_metadata,
                 forward_batch=batch,
-                total_timesteps=total_timesteps,
             ):
                 noise_pred_uncond = self._predict_noise(
                     current_model=current_model,
