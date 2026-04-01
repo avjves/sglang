@@ -23,6 +23,9 @@ from sglang.multimodal_gen import envs
 from sglang.multimodal_gen.configs.models.encoders import T5Config
 from sglang.multimodal_gen.configs.pipeline_configs.base import PipelineConfig
 from sglang.multimodal_gen.configs.quantization import NunchakuSVDQuantArgs
+from sglang.multimodal_gen.runtime.layers.attention.hybrid_schedule import (
+    HybridAttentionSchedule,
+)
 from sglang.multimodal_gen.runtime.layers.quantization.configs.nunchaku_config import (
     NunchakuConfig,
 )
@@ -109,7 +112,7 @@ class ServerArgs:
     attention_backend: str = None
     attention_backend_config: addict.Dict | None = None
     hybrid_attention_schedule: str | None = None
-    parsed_hybrid_schedule: Any = None
+    parsed_hybrid_schedule: HybridAttentionSchedule | None = None
     cache_dit_config: str | dict[str, Any] | None = (
         None  # cache-dit config for diffusers
     )
@@ -384,10 +387,6 @@ class ServerArgs:
             self._set_default_attention_backend()
 
         if self.hybrid_attention_schedule:
-            from sglang.multimodal_gen.runtime.layers.attention.hybrid_schedule import (
-                HybridAttentionSchedule,
-            )
-
             self.parsed_hybrid_schedule = HybridAttentionSchedule.from_string(
                 self.hybrid_attention_schedule
             )
