@@ -10,6 +10,29 @@ from sglang.multimodal_gen.runtime.layers.attention.backends.attention_backend i
 )
 from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
 
+# Single shared Hadamard matrix per device, reused by all AITERSageV2Impl instances.
+_shared_hadamard: dict[torch.device, torch.Tensor] = {}
+
+
+def _get_or_create_hadamard() -> torch.Tensor:
+    """Return the shared Hadamard rotation matrix for the local device."""
+    device = (
+        torch.device(torch.cuda.current_device())
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+    if device not in _shared_hadamard:
+        from aiter.ops.triton._triton_kernels.attention.fav3_sage_attention_mxfp4 import (
+            create_hadamard_matrix,
+        )
+
+        block_r = 128
+        hadamard = create_hadamard_matrix(block_r, dtype=torch.bfloat16) / (
+            block_r**0.5
+        )
+        _shared_hadamard[device] = hadamard.to(device)
+    return _shared_hadamard[device]
+
 
 class AITERSageV2Backend(AttentionBackend):
 
@@ -48,9 +71,6 @@ class AITERSageV2Impl(AttentionImpl):
         self.causal = causal
 
         try:
-            from aiter.ops.triton._triton_kernels.attention.fav3_sage_attention_mxfp4 import (
-                create_hadamard_matrix,
-            )
             from aiter.ops.triton.attention.fav3_sage_attention_mxfp4_wrapper import (
                 fav3_sage_mxfp4_wrapper,
             )
@@ -60,20 +80,7 @@ class AITERSageV2Impl(AttentionImpl):
             )
 
         self.attn_fn = fav3_sage_mxfp4_wrapper
-
-        block_r = 128
-        hadamard = create_hadamard_matrix(block_r, dtype=torch.bfloat16) / (
-            block_r**0.5
-        )
-
-        # Replicate Hadamard matrix on each available GPU
-        self._hadamard: dict[torch.device, torch.Tensor] = {}
-        if torch.cuda.is_available():
-            for i in range(torch.cuda.device_count()):
-                device = torch.device(f"cuda:{i}")
-                self._hadamard[device] = hadamard.to(device)
-        else:
-            self._hadamard[torch.device("cpu")] = hadamard
+        self._hadamard_R = _get_or_create_hadamard()
 
     def forward(
         self,
@@ -104,7 +111,7 @@ class AITERSageV2Impl(AttentionImpl):
             key,
             value,
             hadamard_rotation=True,
-            R=self._hadamard[query.device],
+            R=self._hadamard_R,
             causal=self.causal,
         )
         return output
