@@ -22,9 +22,6 @@ from sglang.multimodal_gen.runtime.layers.attention.backends.attention_backend i
     AttentionImpl,
     wrap_attention_impl_forward,
 )
-from sglang.multimodal_gen.runtime.layers.attention.hybrid_schedule import (
-    HybridAttentionSchedule,
-)
 from sglang.multimodal_gen.runtime.layers.attention.selector import (
     get_attn_backend,
     global_force_attn_backend_context_manager,
@@ -42,44 +39,6 @@ from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
 from sglang.multimodal_gen.utils import get_compute_dtype
 
 
-class HybridAttentionImpl(AttentionImpl):
-    """Stable wrapper that holds two attention impls and dispatches per-step.
-
-    ``self.attn_impl`` on the parent module always points to this object,
-    so torch.compile guards on the attribute identity never invalidate.
-    Dispatch reads ``_use_high`` (a plain bool) from the shared schedule,
-    set outside the compiled region.  Dynamo guards on it — only 2 values
-    means 2 cached graph variants after warmup, no recompiles, no graph breaks.
-    """
-
-    def __init__(
-        self,
-        high_impl: AttentionImpl,
-        low_impl: AttentionImpl,
-        schedule: HybridAttentionSchedule,
-    ) -> None:
-        # Intentionally skip AttentionImpl.__init__ (abstract).
-        self._high_impl = high_impl
-        self._low_impl = low_impl
-        self._schedule = schedule
-
-    def _get_active_impl(self) -> AttentionImpl:
-        if self._schedule._use_high is None or self._schedule._use_high:
-            return self._high_impl
-        return self._low_impl
-
-    def preprocess_qkv(self, qkv, attn_metadata):
-        return self._get_active_impl().preprocess_qkv(qkv, attn_metadata)
-
-    def postprocess_output(self, output, attn_metadata):
-        return self._get_active_impl().postprocess_output(output, attn_metadata)
-
-    def forward(self, query, key, value, attn_metadata=None, **kwargs):
-        return self._get_active_impl().forward(
-            query, key, value, attn_metadata=attn_metadata, **kwargs
-        )
-
-
 def _init_hybrid_schedule(
     module: nn.Module,
     head_size: int,
@@ -91,15 +50,14 @@ def _init_hybrid_schedule(
     prefix: str,
     extra_impl_args: dict,
 ) -> None:
-    """Initialize hybrid attention schedule on an attention module if configured.
+    """Register an attention module for hybrid backend swapping.
 
-    Wraps the module's ``attn_impl`` in a :class:`HybridAttentionImpl` that
-    holds both the high-precision and low-precision impls.  The wrapper's
-    identity never changes, so torch.compile guards stay valid.
-
-    All wrappers share the same ``HybridAttentionSchedule`` instance from
-    ``ServerArgs``, so a single ``update_use_high()`` call before each
-    denoising step updates all of them.
+    Creates both a high-precision and low-precision impl, registers the
+    module on the shared ``HybridAttentionSchedule`` from ``ServerArgs``.
+    Before each denoising step, ``schedule.update_current_backend()``
+    swaps ``module.attn_impl`` to the correct impl directly — no wrapper,
+    so torch.compile sees the same code path as non-hybrid.  Dynamo
+    guards on ``attn_impl`` identity → 2 cached graph variants after warmup.
     """
     from sglang.multimodal_gen.runtime.server_args import get_global_server_args
 
@@ -147,8 +105,9 @@ def _init_hybrid_schedule(
     )
     wrap_attention_impl_forward(low_impl)
 
-    wrapper = HybridAttentionImpl(high_impl, low_impl, schedule)
-    module.attn_impl = wrapper
+    schedule.register_module(module, high_impl, low_impl)
+    # Default to high-precision impl until the first update_current_backend call
+    module.attn_impl = high_impl
 
 
 class UlyssesAttention(nn.Module):

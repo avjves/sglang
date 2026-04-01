@@ -1,9 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Any
 
 from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
+
+if TYPE_CHECKING:
+    import torch.nn as nn
+
+    from sglang.multimodal_gen.runtime.layers.attention.backends.attention_backend import (
+        AttentionImpl,
+    )
 
 
 @dataclass
@@ -14,24 +21,38 @@ class HybridAttentionSchedule:
     ``high_precision_last_steps`` steps use the high-precision backend,
     while the middle steps use the low-precision backend.
 
-    Parsed once on ``ServerArgs`` and shared by all ``HybridAttentionImpl``
-    instances.  ``_use_high`` is a plain bool updated outside the compiled
-    region.  Dynamo guards on it — only 2 possible values means at most
-    2 cached graph variants, no recompiles after warmup, no graph breaks.
+    Parsed once on ``ServerArgs`` and shared across all attention modules.
+    Before each denoising step, ``update_current_backend()`` swaps
+    ``module.attn_impl`` on every registered module to the correct impl.
+    Dynamo guards on ``attn_impl`` identity — 2 impls means 2 cached
+    graph variants after warmup, zero overhead in the compiled region.
     """
 
     high_precision_backend: AttentionBackendEnum
     low_precision_backend: AttentionBackendEnum
     high_precision_first_steps: int
     high_precision_last_steps: int
-    _use_high: Optional[bool] = field(default=None, repr=False)
+    _registered_modules: list[tuple[Any, Any, Any]] = field(
+        default_factory=list, repr=False
+    )
+
+    def register_module(
+        self,
+        module: "nn.Module",
+        high_impl: "AttentionImpl",
+        low_impl: "AttentionImpl",
+    ) -> None:
+        """Register an attention module for backend swapping."""
+        self._registered_modules.append((module, high_impl, low_impl))
 
     def update_current_backend(self, step_index: int, total_steps: int) -> None:
-        """Compute and store whether the current step uses the high backend."""
-        self._use_high = (
+        """Swap attn_impl on all registered modules for the current step."""
+        use_high = (
             self.get_backend_for_step(step_index, total_steps)
             == self.high_precision_backend
         )
+        for module, high_impl, low_impl in self._registered_modules:
+            module.attn_impl = high_impl if use_high else low_impl
 
     def get_backend_for_step(
         self, step_index: int, total_steps: int
