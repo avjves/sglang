@@ -36,6 +36,7 @@ from sglang.multimodal_gen.runtime.managers.forward_context import (
     get_forward_context,
 )
 from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
+from sglang.multimodal_gen.runtime.server_args import get_global_server_args
 from sglang.multimodal_gen.utils import get_compute_dtype
 
 
@@ -53,13 +54,8 @@ def _init_hybrid_schedule(
     """Register an attention module for hybrid backend swapping.
 
     Creates both a high-precision and low-precision impl, registers the
-    module on the shared ``HybridAttentionSchedule`` from ``ServerArgs``.
-    Before each denoising step, ``schedule.update_current_backend()``
-    swaps ``module.attn_impl`` to the correct impl directly — no wrapper,
-    so torch.compile sees the same code path as non-hybrid.  Dynamo
-    guards on ``attn_impl`` identity → 2 cached graph variants after warmup.
+    module on the shared ``HybridAttentionSchedule``.
     """
-    from sglang.multimodal_gen.runtime.server_args import get_global_server_args
 
     server_args = get_global_server_args()
     if server_args is None or server_args.parsed_hybrid_schedule is None:
@@ -490,7 +486,6 @@ class USPAttention(nn.Module):
         """
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
-
         if self.skip_sequence_parallel or get_sequence_parallel_world_size() == 1:
             # No sequence parallelism, just run local attention.
             out = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
