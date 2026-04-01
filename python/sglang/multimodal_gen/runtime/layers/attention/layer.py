@@ -47,8 +47,9 @@ class HybridAttentionImpl(AttentionImpl):
 
     ``self.attn_impl`` on the parent module always points to this object,
     so torch.compile guards on the attribute identity never invalidate.
-    Dispatch reads ``current_timestep`` and ``total_timesteps`` from
-    :class:`ForwardContext` to pick the active impl via the schedule.
+    Dispatch reads ``_use_high`` (a plain bool) from the shared schedule,
+    set outside the compiled region.  Dynamo guards on it — only 2 values
+    means 2 cached graph variants after warmup, no recompiles, no graph breaks.
     """
 
     def __init__(
@@ -63,11 +64,7 @@ class HybridAttentionImpl(AttentionImpl):
         self._schedule = schedule
 
     def _get_active_impl(self) -> AttentionImpl:
-        ctx = get_forward_context()
-        target = self._schedule.get_backend_for_step(
-            ctx.current_timestep, ctx.total_timesteps
-        )
-        if target == self._schedule.high_precision_backend:
+        if self._schedule._use_high is None or self._schedule._use_high:
             return self._high_impl
         return self._low_impl
 
@@ -100,18 +97,17 @@ def _init_hybrid_schedule(
     holds both the high-precision and low-precision impls.  The wrapper's
     identity never changes, so torch.compile guards stay valid.
 
-    At runtime, each wrapper reads the current step from
-    :class:`ForwardContext` and dispatches to the appropriate impl.
+    All wrappers share the same ``HybridAttentionSchedule`` instance from
+    ``ServerArgs``, so a single ``update_use_high()`` call before each
+    denoising step updates all of them.
     """
     from sglang.multimodal_gen.runtime.server_args import get_global_server_args
 
     server_args = get_global_server_args()
-    if server_args is None or not server_args.hybrid_attention_schedule:
+    if server_args is None or server_args.parsed_hybrid_schedule is None:
         return
 
-    schedule = HybridAttentionSchedule.from_string(
-        server_args.hybrid_attention_schedule
-    )
+    schedule = server_args.parsed_hybrid_schedule
 
     # Force each backend explicitly via the global override so the
     # CLI/default --attention-backend doesn't interfere.

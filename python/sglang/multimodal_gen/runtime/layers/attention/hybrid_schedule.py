@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
 
@@ -12,12 +13,25 @@ class HybridAttentionSchedule:
     During denoising, the first ``high_precision_first_steps`` and last
     ``high_precision_last_steps`` steps use the high-precision backend,
     while the middle steps use the low-precision backend.
+
+    Parsed once on ``ServerArgs`` and shared by all ``HybridAttentionImpl``
+    instances.  ``_use_high`` is a plain bool updated outside the compiled
+    region.  Dynamo guards on it — only 2 possible values means at most
+    2 cached graph variants, no recompiles after warmup, no graph breaks.
     """
 
     high_precision_backend: AttentionBackendEnum
     low_precision_backend: AttentionBackendEnum
     high_precision_first_steps: int
     high_precision_last_steps: int
+    _use_high: Optional[bool] = field(default=None, repr=False)
+
+    def update_current_backend(self, step_index: int, total_steps: int) -> None:
+        """Compute and store whether the current step uses the high backend."""
+        self._use_high = (
+            self.get_backend_for_step(step_index, total_steps)
+            == self.high_precision_backend
+        )
 
     def get_backend_for_step(
         self, step_index: int, total_steps: int

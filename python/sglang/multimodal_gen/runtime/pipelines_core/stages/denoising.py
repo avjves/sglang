@@ -1553,6 +1553,13 @@ class DenoisingStage(PipelineStage):
         Returns:
             The predicted noise.
         """
+        # Update hybrid attention dispatch tensor outside the compiled region
+        # so dynamo traces it symbolically (graph break via .item(), not recompile).
+        if server_args.parsed_hybrid_schedule is not None:
+            server_args.parsed_hybrid_schedule.update_current_backend(
+                timestep_index, total_timesteps
+            )
+
         noise_pred_cond: torch.Tensor | None = None
         noise_pred_uncond: torch.Tensor | None = None
         cfg_rank = get_classifier_free_guidance_rank()
