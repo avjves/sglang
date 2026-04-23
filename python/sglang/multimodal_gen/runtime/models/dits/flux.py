@@ -56,6 +56,10 @@ from sglang.multimodal_gen.runtime.models.dits.base import CachableDiT
 from sglang.multimodal_gen.runtime.platforms import current_platform
 from sglang.multimodal_gen.runtime.utils.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
+from sglang.multimodal_gen.runtime.distributed.parallel_state import (
+      get_sequence_parallel_world_size,
+      get_sequence_parallel_rank,
+)
 
 logger = init_logger(__name__)  # pylint: disable=invalid-name
 
@@ -404,9 +408,10 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
             query = torch.cat([encoder_query, query], dim=1)
             key = torch.cat([encoder_key, key], dim=1)
             value = torch.cat([encoder_value, value], dim=1)
-            num_replicated_prefix = (
-                num_replicated_prefix or encoder_hidden_states.shape[1]
-            )
+            #num_replicated_prefix = (
+            #    num_replicated_prefix or encoder_hidden_states.shape[1]
+            #)
+            num_replicated_prefix = 0
         else:
             query, key = apply_qk_norm_with_optional_rope(
                 q=query,
@@ -538,7 +543,8 @@ class FluxSingleTransformerBlock(nn.Module):
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
         joint_attention_kwargs = joint_attention_kwargs or {}
-        joint_attention_kwargs.setdefault("num_replicated_prefix", text_seq_len or 0)
+        #joint_attention_kwargs.setdefault("num_replicated_prefix", text_seq_len or 0)
+        joint_attention_kwargs.setdefault("num_replicated_prefix", 0)
 
         if self.use_nunchaku_structure:
             if _nunchaku_fused_ops_available:
@@ -910,6 +916,14 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
             temb = self.time_text_embed(timestep, pooled_projections)
 
         encoder_hidden_states, _ = self.context_embedder(encoder_hidden_states)
+        # Chunkie chunk chunk
+        sp_size = get_sequence_parallel_world_size()
+        if sp_size > 1:
+            encoder_hidden_states = torch.chunk(
+                encoder_hidden_states,
+                sp_size,
+                dim=1,
+            )[get_sequence_parallel_rank()]
 
         if (
             joint_attention_kwargs is not None
