@@ -359,6 +359,7 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
         num_rep = (
             encoder_hidden_states.shape[1] if encoder_hidden_states is not None else 0
         )
+        num_rep = 0
         hidden_states = self.attn(query, key, value, num_replicated_prefix=num_rep)
 
         hidden_states = hidden_states.flatten(2, 3)
@@ -609,7 +610,7 @@ class Flux2SingleTransformerBlock(nn.Module):
         attn_output = self.attn(
             hidden_states=norm_hidden_states,
             freqs_cis=freqs_cis,
-            num_replicated_prefix=text_seq_len or 0,
+            num_replicated_prefix=0,
             **joint_attention_kwargs,
         )
 
