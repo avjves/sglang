@@ -27,6 +27,10 @@ from sglang.multimodal_gen.configs.pipeline_configs.hunyuan import (
 )
 from sglang.multimodal_gen.configs.pipeline_configs.qwen_image import _pack_latents
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
+from sglang.multimodal_gen.runtime.distributed.parallel_state import (
+    get_sequence_parallel_rank,
+    get_sequence_parallel_world_size,
+)
 
 
 def t5_postprocess_text(outputs: BaseEncoderOutput, _text_inputs) -> torch.Tensor:
@@ -434,7 +438,11 @@ class Flux2PipelineConfig(FluxPipelineConfig):
         return shape
 
     def get_pos_prompt_embeds(self, batch):
-        return batch.prompt_embeds[0]
+        embeds = batch.prompt_embeds[0]
+        sp_size = get_sequence_parallel_world_size()
+        if sp_size > 1:
+            embeds = torch.chunk(embeds, sp_size, dim=1)[get_sequence_parallel_rank()]
+        return embeds
 
     def get_neg_prompt_embeds(self, batch):
         return batch.negative_prompt_embeds[0]
@@ -534,6 +542,8 @@ class Flux2PipelineConfig(FluxPipelineConfig):
             img_sin = torch.cat([img_sin, cond_sin], dim=0)
 
         txt_cos, txt_sin = rotary_emb.forward(txt_ids)
+        txt_cos = shard_rotary_emb_for_sp(txt_cos)
+        txt_sin = shard_rotary_emb_for_sp(txt_sin)
 
         cos = torch.cat([txt_cos, img_cos], dim=0).to(device=device)
         sin = torch.cat([txt_sin, img_sin], dim=0).to(device=device)
