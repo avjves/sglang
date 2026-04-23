@@ -151,6 +151,8 @@ class FluxPipelineConfig(ImagePipelineConfig):
         img_sin = shard_rotary_emb_for_sp(img_sin)
 
         txt_cos, txt_sin = rotary_emb.forward(txt_ids)
+        txt_cos = shard_rotary_emb_for_sp(txt_cos)
+        txt_sin = shard_rotary_emb_for_sp(txt_sin)
 
         cos = torch.cat([txt_cos, img_cos], dim=0).to(device=device)
         sin = torch.cat([txt_sin, img_sin], dim=0).to(device=device)
