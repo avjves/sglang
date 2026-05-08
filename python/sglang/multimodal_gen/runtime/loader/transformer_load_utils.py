@@ -479,14 +479,10 @@ def _resolve_quant_config(
     resolve quant config from checkpoints' metadata
     priority: explicit --quantization flag -> model config.json -> safetensors metadata -> format-specific fallback
     """
-    # priority: explicit --quantization flag (e.g. mxfp8, mxfp4, modelslim)
-    if server_args.quantization is not None:
-        from sglang.multimodal_gen.runtime.layers.quantization import (
-            get_quantization_config,
-        )
-
-        quant_cls = get_quantization_config(server_args.quantization)
-        return quant_cls.from_config({})
+    # priority: explicit --quantization flag (e.g. mxfp8, fp8, modelslim)
+    # Handled via get_quant_config(server_args=server_args) below, which calls
+    # resolve_online_quant_config() to construct the config directly (bypassing
+    # from_config, which requires checkpoint metadata keys).
 
     arch_config = server_args.pipeline_config.dit_config.arch_config
     param_names_mapping_dict = arch_config.param_names_mapping
