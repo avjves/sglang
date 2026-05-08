@@ -12,6 +12,7 @@ from sglang.multimodal_gen.runtime.layers.quantization import (
     get_quantization_config,
 )
 from sglang.multimodal_gen.runtime.layers.quantization.fp8 import Fp8Config
+from sglang.multimodal_gen.runtime.layers.quantization.mxfp4 import Mxfp4Config
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
@@ -125,6 +126,9 @@ def resolve_online_quant_config(quantization_method: str) -> QuantizationConfig:
             is_checkpoint_fp8_serialized=False,
             activation_scheme="dynamic",
         )
+    if quantization_method == "mxfp4":
+        logger.info("Online MXFP4 quantization enabled.")
+        return Mxfp4Config(is_checkpoint_mxfp4_serialized=False)
     return None
 
 
