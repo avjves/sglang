@@ -188,6 +188,8 @@ class ServerArgs(DisaggArgsMixin):
 
     # path to pre-quantized transformer weights (single .safetensors or directory).
     transformer_weights_path: str | None = None
+    # Online quantization method to apply
+    quantization: str | None = None
     # can restrict layers to adapt, e.g. ["q_proj"]
     # Will adapt only q, k, v, o by default.
     lora_target_modules: list[str] | None = None
@@ -1166,9 +1168,10 @@ class ServerArgs(DisaggArgsMixin):
         parser.add_argument(
             "--quantization",
             type=str,
-            default=None,
-            help='Quantization method override (e.g. "mxfp8", "fp8", "modelslim"). '
-            "When set, the transformer loader will use this instead of auto-detection.",
+            default=ServerArgs.quantization,
+            choices=["mxfp8", "modelslim", "fp8", "mxfp4"],
+            help="Apply online quantization to model weights. "
+            "Quantizes weights on-the-fly at load time, no pre-converted checkpoint needed.",
         )
 
         # Nunchaku SVDQuant quantization parameters
