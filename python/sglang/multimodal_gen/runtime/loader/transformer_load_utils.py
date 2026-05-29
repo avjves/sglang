@@ -507,12 +507,14 @@ def _resolve_quant_config(
         if server_args.quantization == "modelslim":
             return get_quant_config(hf_config, component_model_path)
 
-        # Online-quant convention: for `fp8` and `mxfp4`, a no-arg
-        # QuantizationConfig() selects the post-load path -- weights load
+        # Online-quant convention: for `fp8` and `mxfp4`, weights load
         # in source dtype and are quantized in
         # process_weights_after_loading.
         quant_cls = get_quantization_config(server_args.quantization)
-        return quant_cls()
+        kwargs = {}
+        if server_args.quantization_ignored_layers:
+            kwargs["ignored_layers"] = server_args.quantization_ignored_layers
+        return quant_cls(**kwargs)
 
     quant_config = get_quant_config(hf_config, component_model_path)
     if quant_config is None and server_args.transformer_weights_path:
