@@ -210,6 +210,7 @@ class Mxfp4LinearMethod(LinearMethodBase):
             f"scale {layer.weight_scale.shape}"
         )
 
+    @torch.compiler.disable
     def apply(
         self,
         layer: torch.nn.Module,
