@@ -118,6 +118,10 @@ class RocmPlatform(Platform):
             logger.info("Using AITer backend on ROCm.")
             return "sglang.multimodal_gen.runtime.layers.attention.backends.aiter.AITerBackend"
 
+        elif selected_backend == AttentionBackendEnum.AITER_FP8:
+            logger.info("Using AITER FP8 backend on ROCm.")
+            return "sglang.multimodal_gen.runtime.layers.attention.backends.aiter_fp8.AITERFP8Backend"
+
         elif selected_backend == AttentionBackendEnum.AITER_SAGE:
             if dtype in (torch.float16, torch.bfloat16):
                 logger.info("Using AITER Sage backend on ROCm.")
