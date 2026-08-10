@@ -10,6 +10,7 @@ import weakref
 import torch
 import torch.nn as nn
 
+from sglang.multimodal_gen import envs
 from sglang.multimodal_gen.runtime.distributed import (
     get_decode_parallel_world_size,
     get_local_torch_device,
@@ -174,6 +175,8 @@ class DecodingStage(PipelineStage):
     ):
         decode_fn = decode_fn or vae.decode
         if not server_args.enable_torch_compile or not isinstance(vae, nn.Module):
+            return decode_fn
+        if envs.SGLANG_DISABLE_VAE_TORCH_COMPILE:
             return decode_fn
 
         compiled_callable = compiled_callable or self._compiled_vae_decode
