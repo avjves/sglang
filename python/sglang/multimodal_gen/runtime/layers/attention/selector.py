@@ -215,23 +215,30 @@ def _cached_get_attn_backend(
 
     supported_attention_backends = set(supported_attention_backends)
 
-    # get device-specific attn_backend
-    if len(supported_attention_backends) == 0:
-        # all attention backends are allowed
-        pass
-    elif selected_backend is None and len(supported_attention_backends) == 1:
-        selected_backend = next(iter(supported_attention_backends))
-    elif selected_backend is not None and not _is_backend_supported(
-        selected_backend, supported_attention_backends
-    ):
-        supported_attention_backends_str = [
-            supported_attention_backend.__str__()
-            for supported_attention_backend in supported_attention_backends
-        ]
-        raise ValueError(
-            f"Attention backend '{selected_backend}' is not supported by this "
-            f"attention layer; supported backends: {supported_attention_backends_str}"
-        )
+    # get device-specific attn_backend. An empty set means the layer accepts
+    # any backend.
+    if supported_attention_backends:
+        if selected_backend is not None and not _is_backend_supported(
+            selected_backend, supported_attention_backends
+        ):
+            # The selected backend is a preference (usually the pipeline-wide
+            # --attention-backend), not an assertion about this layer. Demote
+            # to the layer's own constraint instead of failing the run.
+            supported_attention_backends_str = [
+                supported_attention_backend.__str__()
+                for supported_attention_backend in supported_attention_backends
+            ]
+            logger.warning_once(
+                f"Attention backend '{selected_backend}' is not supported by this "
+                f"attention layer; falling back to "
+                f"{supported_attention_backends_str}"
+            )
+            selected_backend = None
+
+        # Also applies after a demotion above: a layer that admits exactly one
+        # backend gets it, rather than falling through to auto-selection.
+        if selected_backend is None and len(supported_attention_backends) == 1:
+            selected_backend = next(iter(supported_attention_backends))
 
     attention_cls = current_platform.get_attn_backend_cls_str(
         selected_backend, head_size, dtype
