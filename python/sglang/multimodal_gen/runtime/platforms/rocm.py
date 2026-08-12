@@ -131,6 +131,16 @@ class RocmPlatform(Platform):
                     dtype,
                 )
 
+        elif selected_backend == AttentionBackendEnum.AITER_FP8:
+            if dtype not in (torch.float16, torch.bfloat16):
+                logger.warning(
+                    "AITER FP8 backend expects fp16/bf16 inputs (quantized to fp8 "
+                    "internally) but got dtype=%s. Proceeding anyway.",
+                    dtype,
+                )
+            logger.info("Using AITER FP8 backend on ROCm.")
+            return "sglang.multimodal_gen.runtime.layers.attention.backends.aiter_fp8.AITerFP8Backend"
+
         elif selected_backend in (
             AttentionBackendEnum.SLIDING_TILE_ATTN,
             AttentionBackendEnum.SAGE_ATTN,
