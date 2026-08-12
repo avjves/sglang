@@ -205,6 +205,8 @@ class ServerArgs(DisaggServerArgsMixin):
     # Attention
     attention_backend: str = None
     attention_backend_config: addict.Dict | None = None
+    hybrid_attention_schedule: str | None = None
+    parsed_hybrid_schedule: Any = None
     component_attention_backends: dict[str, str] | str | None = field(
         default_factory=dict
     )
@@ -805,6 +807,15 @@ class ServerArgs(DisaggServerArgsMixin):
         )
 
     def _adjust_attention_backend(self):
+        if self.hybrid_attention_schedule:
+            from sglang.multimodal_gen.runtime.layers.attention.hybrid_schedule import (
+                HybridAttentionSchedule,
+            )
+
+            self.parsed_hybrid_schedule = HybridAttentionSchedule.from_string(
+                self.hybrid_attention_schedule
+            )
+
         if self.attention_backend in ["fa3", "fa4"]:
             self.attention_backend = "fa"
         self.component_attention_backends = (
@@ -1456,6 +1467,17 @@ class ServerArgs(DisaggServerArgsMixin):
             type=str,
             default=None,
             help="Configuration for the attention backend. Can be a JSON string, a path to a JSON/YAML file, or key=value pairs.",
+        )
+        parser.add_argument(
+            "--hybrid-attention-schedule",
+            type=str,
+            default=None,
+            help=(
+                "Hybrid attention schedule: 'high_backend:low_backend:first_steps:last_steps'. "
+                "Uses high-precision backend for the first and last N steps, "
+                "low-precision backend for middle steps. "
+                "Example: 'fa:torch_sdpa:3:3'."
+            ),
         )
         parser.add_argument(
             "--component-attention-backends",
