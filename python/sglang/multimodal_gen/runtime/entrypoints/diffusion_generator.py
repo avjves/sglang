@@ -473,11 +473,25 @@ class DiffGenerator:
         if not results:
             return
         if self.server_args.warmup_mode != "off":
-            total_duration_ms = results[0].metrics.get("total_duration_ms", 0)
-            logger.info(
-                f"Warmed-up request processed in {GREEN}%.2f{RESET} seconds (with warmup excluded)",
-                total_duration_ms / 1000.0,
-            )
+            durations_s = [
+                r.metrics.get("total_duration_ms", 0) / 1000.0 for r in results
+            ]
+            for duration_s in durations_s:
+                logger.info(
+                    f"Warmed-up request processed in {GREEN}%.2f{RESET} seconds (with warmup excluded)",
+                    duration_s,
+                )
+            if len(durations_s) > 1:
+                mean_s = sum(durations_s) / len(durations_s)
+                std_s = (
+                    sum((d - mean_s) ** 2 for d in durations_s) / len(durations_s)
+                ) ** 0.5
+                logger.info(
+                    f"total_duration over %d requests: mean={GREEN}%.3f{RESET}s std=%.3fs (with warmup excluded)",
+                    len(durations_s),
+                    mean_s,
+                    std_s,
+                )
 
         peak_memories = [r.peak_memory_mb for r in results if r.peak_memory_mb]
         if peak_memories:

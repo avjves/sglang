@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     NVCC_THREADS: str | None = None
     CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
+    SGLANG_DIFFUSION_DISABLE_SP_PAD_MASK: bool = False
     SGLANG_DIFFUSION_SERVER_DEV_MODE: bool = False
     SGLANG_DIFFUSION_STAGE_LOGGING: bool = False
     SGLANG_DIFFUSION_CFG_GATE_STEP: float = 1.0
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
     SGLANG_DIFFUSION_FLASHINFER_FP4_GEMM_BACKEND: str | None = None
     SGLANG_DIFFUSION_ENABLE_W8A8_FP8_GEMM: bool = False
     SGLANG_DIFFUSION_VAE_CHANNELS_LAST_3D: str = "auto"
+    SGLANG_DISABLE_VAE_TORCH_COMPILE: bool = False
     SGLANG_USE_ROCM_VAE: bool = False
     SGLANG_USE_ROCM_CUDNN_BENCHMARK: bool = False
     SGLANG_USE_ROCM_VAE_CONV2D: bool = False
@@ -198,6 +200,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "SGLANG_DIFFUSION_ATTENTION_BACKEND": _lazy_str(
         "SGLANG_DIFFUSION_ATTENTION_BACKEND"
     ),
+    # Drop the SP tail-pad attention mask and run dense (unmasked) attention on
+    # the padded layout, instead of the packed-varlen path. Applies only when
+    # sequence parallelism is active and the mask is derived purely from the
+    # shard pad span.
+    "SGLANG_DIFFUSION_DISABLE_SP_PAD_MASK": _lazy_bool(
+        "SGLANG_DIFFUSION_DISABLE_SP_PAD_MASK"
+    ),
     # Use dedicated multiprocess context for workers.
     # Both spawn and fork work
     "SGLANG_DIFFUSION_WORKER_MULTIPROC_METHOD": _lazy_str(
@@ -227,6 +236,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     ),
     "SGLANG_DIFFUSION_VAE_CHANNELS_LAST_3D": _lazy_str(
         "SGLANG_DIFFUSION_VAE_CHANNELS_LAST_3D", "auto"
+    ),
+    # Skip torch.compile on the VAE decode path even when torch.compile is
+    # enabled globally. Use when the VAE relies on a custom op that is not
+    # compileable (e.g. AITer GroupNorm on ROCm), while keeping DiT compile on.
+    "SGLANG_DISABLE_VAE_TORCH_COMPILE": _lazy_bool(
+        "SGLANG_DISABLE_VAE_TORCH_COMPILE"
     ),
     # ================== cache-dit Env Vars ==================
     # Enable cache-dit acceleration for DiT inference

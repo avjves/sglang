@@ -29,7 +29,7 @@ class DiTArchConfig(ArchConfig):
             AttentionBackendEnum.SAGE_ATTN,
             AttentionBackendEnum.FA,
             AttentionBackendEnum.AITER,
-            AttentionBackendEnum.AITER_SAGE,
+            AttentionBackendEnum.AITER_QUANT,
             AttentionBackendEnum.TORCH_SDPA,
             AttentionBackendEnum.VIDEO_SPARSE_ATTN,
             AttentionBackendEnum.SPARSE_VIDEO_GEN_2_ATTN,

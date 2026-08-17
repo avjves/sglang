@@ -76,7 +76,7 @@ class SGLDiffusionProfiler:
         common_torch_profiler_args = dict(
             activities=activities,
             record_shapes=True,
-            with_stack=True,
+            with_stack=False,
             on_trace_ready=(
                 None
                 if not current_platform.is_npu()
