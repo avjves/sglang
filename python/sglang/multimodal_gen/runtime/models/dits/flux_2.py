@@ -26,13 +26,17 @@ from sglang.kernels.ops.diffusion import (
     can_defer_flux2_gated_residual,
     can_use_flux2_gated_resnorm,
     can_use_fused_layernorm_modulate,
+    can_use_ln_modulate,
     flux2_gated_resnorm_raw,
     flux2_nvfp4_swiglu_quant_active,
     fused_layernorm_modulate_fp8_quant_raw,
     fused_layernorm_modulate_raw,
+    fused_ln_modulate,
+    fused_ln_modulate_active,
     fused_packed_silu_mul_bitexact,
     is_plain_layer_norm,
     mark_flux2_nvfp4_swiglu_quant_site,
+    mark_fused_ln_modulate_site,
     residual_gate_add,
     try_flux2_token_cat_fp8,
     try_flux2_token_cat_nvfp4,
@@ -265,26 +269,22 @@ def _flux2_norm_maybe_fp8(
     return norm_hidden_states, hidden_states
 
 
-def _flux2_norm_modulate(
+def _flux2_fused_ln_modulate(
     norm: nn.Module,
     x: torch.Tensor,
     scale: torch.Tensor,
     shift: torch.Tensor,
-) -> torch.Tensor:
-    """Bit-exact single-kernel ``LN(x) * (1 + scale) + shift``."""
-    # Preserve the original expression for Dynamo/Inductor.  This direct
-    # Triton dispatch is intentionally an eager fast path.
-    if torch.compiler.is_compiling():
-        return norm(x) * (1 + scale) + shift
-
-    scale_row = scale.squeeze(1) if scale.dim() == 3 and scale.shape[1] == 1 else scale
-    shift_row = shift.squeeze(1) if shift.dim() == 3 and shift.shape[1] == 1 else shift
+    *,
+    scale_row: torch.Tensor,
+    shift_row: torch.Tensor,
+) -> Optional[torch.Tensor]:
+    """Bit-exact single-kernel LN+modulate, or ``None`` when unavailable."""
     if (
         _FLUX2_LN_MOD.disabled
         or not is_plain_layer_norm(norm, x.shape[-1])
         or not can_use_fused_layernorm_modulate(x, scale_row, shift_row)
     ):
-        return norm(x) * (1 + scale) + shift
+        return None
 
     # The bit-exact contract is set by dtype/reduction width/affine-row
     # layout, not by the number of independent rows.  Excluding sequence
@@ -301,13 +301,13 @@ def _flux2_norm_modulate(
     )
     verified = sig in _FLUX2_LN_MOD_SIGS
     if not verified and torch.cuda.is_current_stream_capturing():
-        return norm(x) * (1 + scale) + shift
+        return None
     try:
         # Direct dispatch avoids custom-op overhead on this eager-only path.
         out = fused_layernorm_modulate_raw(x, scale_row, shift_row, norm.eps)
     except Exception as exc:
         _FLUX2_LN_MOD.on_exception(exc, logger=logger)
-        return norm(x) * (1 + scale) + shift
+        return None
     if verified:
         return out
     ref = norm(x) * (1 + scale) + shift
@@ -321,6 +321,46 @@ def _flux2_norm_modulate(
             "platform; falling back to eager"
         ),
     )
+
+
+def _flux2_norm_modulate(
+    norm: nn.Module,
+    x: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+) -> torch.Tensor:
+    """``LN(x) * (1 + scale) + shift`` for the FLUX.2 adaLN sites.
+
+    Priority: (1) the bit-exact single-kernel LN+modulate, which needs no
+    quality gate and so supersedes the fold wherever it verifies; (2) when the
+    site is mounted (``quality="extra-high"`` or ``"high"``) and the bit-exact
+    kernel is unavailable, the modulate folded into the LN affine -- one aten
+    kernel instead of three, not bit-exact.  This is the only fused tier that
+    reaches ROCm, where the kernel behind (1) rejects on ``is_cuda()``;
+    (3) affine-free LayerNorm + eager modulate.
+    """
+    # Preserve the original expression for Dynamo/Inductor.  This direct
+    # Triton dispatch is intentionally an eager fast path.
+    if torch.compiler.is_compiling():
+        return norm(x) * (1 + scale) + shift
+
+    scale_row = scale.squeeze(1) if scale.dim() == 3 and scale.shape[1] == 1 else scale
+    shift_row = shift.squeeze(1) if shift.dim() == 3 and shift.shape[1] == 1 else shift
+
+    out = _flux2_fused_ln_modulate(
+        norm, x, scale, shift, scale_row=scale_row, shift_row=shift_row
+    )
+    if out is not None:
+        return out
+    if (
+        fused_ln_modulate_active(norm)
+        # The fold drops the LN affine into weight/bias, so a norm that carries
+        # its own affine params would lose them.
+        and is_plain_layer_norm(norm, x.shape[-1])
+        and can_use_ln_modulate(x, scale_row, shift_row)
+    ):
+        return fused_ln_modulate(x, scale_row, shift_row, norm.eps)
+    return norm(x) * (1 + scale) + shift
 
 
 def _flux2_swiglu(x: torch.Tensor) -> torch.Tensor:
@@ -920,6 +960,8 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
 
         # QK-norm (+ RoPE) via the shared helper so the fused kernel path is used
         # here too — the single-stream block previously ran norm and RoPE as separate ops.
+        # q/k are strided chunks of the packed to_qkv_mlp_proj output; opting into
+        # the strided layout keeps the fused kernel instead of paying a copy per call.
         query, key = apply_qk_norm_with_optional_rope(
             q=query,
             k=key,
@@ -929,6 +971,7 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
             cos_sin_cache=cos_sin_cache,
             is_neox=False,
             allow_inplace=True,
+            allow_strided_qk=True,
         )
         hidden_states = self.attn(
             query,
@@ -991,6 +1034,7 @@ class Flux2SingleTransformerBlock(nn.Module):
         super().__init__()
 
         self.norm = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
+        mark_fused_ln_modulate_site(self.norm)
 
         # Note that the MLP in/out linear layers are fused with the attention QKV/out projections, respectively; this
         # is often called a "parallel" transformer block. See the [ViT-22B paper](https://arxiv.org/abs/2302.05442)
@@ -1088,6 +1132,8 @@ class Flux2TransformerBlock(nn.Module):
 
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
         self.norm1_context = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
+        mark_fused_ln_modulate_site(self.norm1)
+        mark_fused_ln_modulate_site(self.norm1_context)
 
         self.attn = Flux2Attention(
             query_dim=dim,
@@ -1105,6 +1151,7 @@ class Flux2TransformerBlock(nn.Module):
         )
 
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
+        mark_fused_ln_modulate_site(self.norm2)
         self.ff = Flux2FeedForward(
             dim=dim,
             dim_out=dim,
@@ -1115,6 +1162,7 @@ class Flux2TransformerBlock(nn.Module):
         )
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
+        mark_fused_ln_modulate_site(self.norm2_context)
         self.ff_context = Flux2FeedForward(
             dim=dim,
             dim_out=dim,
