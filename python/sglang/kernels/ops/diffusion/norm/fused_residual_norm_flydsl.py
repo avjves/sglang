@@ -31,6 +31,31 @@ _VEC = 8
 _NUM_WAVES = 10
 FLYDSL_NORM_MIN_ALIGNED_DIM = WARP_SIZE * _NUM_WAVES * _VEC  # 5120
 
+# Wave counts tried in preference order: more waves per workgroup keeps more of
+# the row in flight, but the tile (WARP_SIZE * waves * VEC) has to divide D so
+# the inner loop never runs a partial iteration. 10 waves suits Wan's D=5120;
+# 6 lands Qwen-Image's D=3072 in a single pass.
+_NUM_WAVES_CHOICES = (10, 8, 6, 5, 4, 2, 1)
+
+
+def _pick_num_waves(dim: int) -> int | None:
+    """Largest wave count whose tile divides ``dim``, or ``None`` if none fits."""
+    for waves in _NUM_WAVES_CHOICES:
+        if dim % (WARP_SIZE * waves * _VEC) == 0:
+            return waves
+    return None
+
+
+def flydsl_norm_supports(dim: int, eps: float) -> bool:
+    """Whether a FlyDSL norm kernel can serve this hidden size and epsilon.
+
+    The kernels bake in :data:`_EPS` rather than reading the caller's value, so
+    a norm configured with anything else must stay on the reference path or it
+    would silently normalize with the wrong epsilon.
+    """
+    return _pick_num_waves(dim) is not None and eps == _EPS
+
+
 # Kernel-side epsilon. The public `eps` argument is intentionally ignored, as it
 # was before the stable-API migration; changing that is a separate correctness fix.
 _EPS = 1e-6
@@ -154,11 +179,11 @@ def _bcast_row(row, stride):
 
 def _build_fused_norm_module(D: int, is_rms: bool, has_gate: bool, has_weight: bool):
     VEC = _VEC
-    NUM_WAVES = _NUM_WAVES
-    BLOCK = NUM_WAVES * WARP_SIZE
-    assert D % FLYDSL_NORM_MIN_ALIGNED_DIM == 0, (
-        f"FlyDSL fused_residual_norm requires D % {FLYDSL_NORM_MIN_ALIGNED_DIM} == 0, got D={D}"
+    NUM_WAVES = _pick_num_waves(D)
+    assert NUM_WAVES is not None, (
+        f"FlyDSL fused_residual_norm found no wave count whose tile divides D={D}"
     )
+    BLOCK = NUM_WAVES * WARP_SIZE
     NUM_ITERS = D // (BLOCK * VEC)
     SharedStorage = _make_reduction_storage(NUM_WAVES)
 
@@ -506,11 +531,11 @@ def _fake_flydsl_fused_residual_norm(
 
 def _build_norm_scale_shift_module(D: int, is_rms: bool, has_weight: bool):
     VEC = _VEC
-    NUM_WAVES = _NUM_WAVES
-    BLOCK = NUM_WAVES * WARP_SIZE
-    assert D % FLYDSL_NORM_MIN_ALIGNED_DIM == 0, (
-        f"FlyDSL norm_scale_shift requires D % {FLYDSL_NORM_MIN_ALIGNED_DIM} == 0, got D={D}"
+    NUM_WAVES = _pick_num_waves(D)
+    assert NUM_WAVES is not None, (
+        f"FlyDSL norm_scale_shift found no wave count whose tile divides D={D}"
     )
+    BLOCK = NUM_WAVES * WARP_SIZE
     NUM_ITERS = D // (BLOCK * VEC)
     SharedStorage = _make_reduction_storage(NUM_WAVES)
 
