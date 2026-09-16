@@ -212,6 +212,7 @@ __global__ void fused_qknorm_rope_warp(const QKNormRopeParamsT<kPackKV> __grid_c
   constexpr uint32_t kRotaryLanes = kRopeDim / kElemsPerThread;
   constexpr uint32_t kHalfRotaryLanes = kRotaryLanes / 2;
   constexpr uint32_t kActiveMask = active_mask<kRotaryLanes>();
+  (void)kActiveMask;  // unused on ROCm: __shfl below takes a width, not a mask
   constexpr int64_t kCacheRotaryDim = kCacheHasFullWidth ? 2 * kRopeDim : kRopeDim;
   constexpr int64_t kCosSinStrideBytes = kCacheRotaryDim * sizeof(CacheDType);
 
@@ -323,7 +324,14 @@ __global__ void fused_qknorm_rope_warp(const QKNormRopeParamsT<kPackKV> __grid_c
           for (uint32_t j = 0; j < kVecSize; ++j) {
             auto partner_vec = output_vec[j];
             auto partner_bits = reinterpret_cast<const uint32_t&>(partner_vec);
+#ifndef USE_ROCM
             partner_bits = __shfl_sync(kActiveMask, partner_bits, partner_lane);
+#else
+            // HIP's __shfl_sync wants a 64-bit mask and defaults the shuffle
+            // width to the full wave64; the partner lane is an index inside a
+            // kWarpThreads-wide sub-group, so pass that width explicitly.
+            partner_bits = __shfl(partner_bits, partner_lane, device::kWarpThreads);
+#endif
             reinterpret_cast<uint32_t&>(partner_vec) = partner_bits;
             auto& values = unpack(output_vec[j]);
             const auto& partner_values = unpack(partner_vec);
@@ -402,7 +410,11 @@ __global__ void fused_qknorm_rope_warp(const QKNormRopeParamsT<kPackKV> __grid_c
 
 #pragma unroll
         for (uint32_t i = 0; i < kElemsPerThread; ++i) {
+#ifndef USE_ROCM
           float swapped = __shfl_sync(kActiveMask, elems[i], partner_lane);
+#else
+          float swapped = __shfl(elems[i], partner_lane, device::kWarpThreads);
+#endif
           if (lane_id < kHalfRotaryLanes) {
             swapped = -swapped;
           }

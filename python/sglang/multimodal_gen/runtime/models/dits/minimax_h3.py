@@ -440,7 +440,10 @@ def _apply_qk_norm(
         and q.stride(-2) == k.stride(-2) == head_dim
         and q_norm.eps == k_norm.eps
         and not torch.compiler.is_compiling()
-        and current_platform.is_cuda()
+        # elementwise/qknorm.cuh reaches the GPU only through impl/norm.cuh and
+        # the runtime.cuh macro shims, both of which hipcc builds; it carried
+        # cuda_bf16.h/cuda_fp16.h as dead includes until they were dropped.
+        and (current_platform.is_cuda() or current_platform.is_hip())
     ):
         fused_inplace_qknorm(
             q,
@@ -796,7 +799,9 @@ class MiniMaxH3Attention(nn.Module):
         # cache width covers cos/sin for temporal, height, and width frequencies
         rope_dim = 6 * arch.rope_inv_freq_len
         self._use_fused_qknorm_rope = (
-            current_platform.is_cuda()
+            # qknorm_rope.cuh carries USE_ROCM branches and builds under hipcc,
+            # unlike the norm-only elementwise/qknorm.cuh that pulls cuda_bf16.h.
+            (current_platform.is_cuda() or current_platform.is_hip())
             and can_use_fused_inplace_qknorm_rope(
                 arch.attention_head_dim,
                 rope_dim,
