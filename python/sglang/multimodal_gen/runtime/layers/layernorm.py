@@ -44,6 +44,10 @@ _is_npu = current_platform.is_npu()
 _is_musa = current_platform.is_musa()
 _is_cpu = current_platform.is_cpu()
 _is_xpu = current_platform.is_xpu()
+_is_rocm = current_platform.is_rocm()
+# Both in-place QK-norm JIT kernels build under hipcc: qknorm_rope.cuh carries
+# USE_ROCM branches, and qknorm.cuh needs no PTX or CUDA-only intrinsics.
+_fused_qknorm_platforms = _is_cuda or _is_rocm
 _use_rocm_flydsl = get_bool_env_var("SGLANG_USE_ROCM_FLYDSL")
 _has_attentions = False
 
@@ -984,10 +988,11 @@ def apply_qk_norm(
     batch_size = q.size(0)
     q_eps = q_norm.variance_epsilon
     k_eps = k_norm.variance_epsilon
-    # Only try fused path on CUDA and when it won't introduce implicit copies.
-    # The in-place kernel needs a real view (no copy), so it also requires contiguity.
+    # Only try the fused path where the JIT kernel builds and when it won't
+    # introduce implicit copies. The in-place kernel needs a real view (no
+    # copy), so it also requires contiguity.
     if (
-        _is_cuda
+        _fused_qknorm_platforms
         and allow_inplace
         and (q_eps == k_eps)
         and q.dtype in (torch.float16, torch.bfloat16)
@@ -1146,7 +1151,7 @@ def apply_qk_norm_rope(
 
     if (
         fused_enabled
-        and _is_cuda
+        and _fused_qknorm_platforms
         and not torch.compiler.is_compiling()
         and allow_inplace
         and (q_eps == k_eps)
