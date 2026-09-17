@@ -1028,8 +1028,13 @@ def apply_qk_norm_with_optional_rope(
     positions: Optional[torch.Tensor] = None,
     position_offset: int = 0,
     allow_inplace: bool = True,
+    allow_strided_qk: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Apply QK RMSNorm and optionally RoPE when a cos/sin cache is provided."""
+    """Apply QK RMSNorm and optionally RoPE when a cos/sin cache is provided.
+
+    ``allow_strided_qk`` is forwarded to :func:`apply_qk_norm_rope`; see its
+    docstring for why strided packed-QKV views are opt-in.
+    """
 
     if cos_sin_cache is None:
         return apply_qk_norm(
@@ -1053,6 +1058,7 @@ def apply_qk_norm_with_optional_rope(
         positions=positions,
         position_offset=position_offset,
         allow_inplace=allow_inplace,
+        allow_strided_qk=allow_strided_qk,
     )
 
 

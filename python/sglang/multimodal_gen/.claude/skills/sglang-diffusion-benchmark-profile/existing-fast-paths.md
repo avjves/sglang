@@ -92,7 +92,7 @@ framework-specific optimization workflow.
 - Kernels: `modulate_scale_shift`, `fused_layernorm_modulate`, and
   `fused_qk_head_layernorm`.
 - Locations: `kernels/ops/diffusion/modulate/modulate_scale_shift_jit.py`, `kernels/kda_kernels/layernorm_modulate_triton.py`,
-  `runtime/models/dits/flux.py`, `glm_image.py`, and `sana.py`.
+  `runtime/models/dits/flux.py`, `flux_2.py`, `glm_image.py`, and `sana.py`.
 - Use cases:
   - `x * (1 + scale[:, None]) + shift[:, None]` as one JIT CUDA launch.
   - BF16 `LayerNorm(x) * (1 + scale) + shift` as one Triton launch that
@@ -118,8 +118,9 @@ framework-specific optimization workflow.
   cumulative and may additionally enable model-owned approximate paths.
   Mounting is all-or-nothing per
   transformer/fusion family; VAE gates reset after every decode.
-- Current families include FLUX affine-folded LN+modulate / fused GELU sites,
-  Wan cublasLt/NVFP4 GELU, Qwen added-QKV, GLM/Qwen/Hunyuan/LTX fused GELU,
+- Current families include FLUX.1/FLUX.2 affine-folded LN+modulate, FLUX
+  fused GELU sites, Wan cublasLt/NVFP4 GELU, Qwen added-QKV,
+  GLM/Qwen/Hunyuan/LTX fused GELU,
   LTX RMSNorm+modulate, Hunyuan QK RMSNorm, Ideogram gated RMSNorm,
   LingBot RMSNorm, SANA-Video linear attention, generic KL VAE
   decoder rewrites used by FLUX.1/FLUX.2/Z-Image/SD3, and Wan / Qwen-Image
