@@ -99,6 +99,7 @@ class _QuantFormat(msgspec.Struct, frozen=True):
 # Hand-aligned: a row reads across and a column reads down, against the header.
 _FORMATS = (
     #             name         Q/K              V
+    _QuantFormat("bf16",      _Fmt.BF16,       _Fmt.BF16,       gfx942=True),
     _QuantFormat("bf16fp8",   _Fmt.BF16,       _Fmt.NATIVE_FP8),
     _QuantFormat("i8fp8",     _Fmt.INT8,       _Fmt.NATIVE_FP8, gfx942=True),
     _QuantFormat("fp8",       _Fmt.NATIVE_FP8, _Fmt.NATIVE_FP8, gfx942=True),
