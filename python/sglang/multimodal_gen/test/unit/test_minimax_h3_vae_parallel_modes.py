@@ -48,10 +48,14 @@ from sglang.multimodal_gen.runtime.platforms import (
     current_platform,
 )
 
-# torch.cuda.is_available() is also true on ROCm, where these JIT/Triton
-# kernels do not compile; gate on the platform instead.
+requires_fused_vae_platform = pytest.mark.skipif(
+    not (current_platform.is_cuda() or current_platform.is_rocm()),
+    reason="fused VAE norms need CUDA or ROCm",
+)
+# Separate gate for cases that additionally need cuDNN SDPA or the JIT
+# qknorm_rope kernel, neither of which builds on ROCm today.
 requires_cuda = pytest.mark.skipif(
-    not current_platform.is_cuda(), reason="fused VAE kernels need CUDA"
+    not current_platform.is_cuda(), reason="needs cuDNN SDPA / JIT qknorm_rope"
 )
 
 
@@ -310,7 +314,7 @@ def _h3_shaped_decoder():
     return decoder
 
 
-@requires_cuda
+@requires_fused_vae_platform
 def test_fused_decoder_runs_only_under_the_fast_path_gate():
     """The fused residual add + RMSNorm is not bit-exact, so it runs only while
     the decode-scoped gate is on (quality lossless/high); exact keeps the
@@ -343,9 +347,7 @@ def test_fused_decoder_runs_only_under_the_fast_path_gate():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
-def test_fused_decoder_is_disabled_off_nvidia():
-    # On ROCm tensor.is_cuda is true, but the fused Triton norms decoded to NaN
-    # on MI300; the decoder must keep the unfused path there.
+def test_fused_decoder_is_disabled_on_unsupported_platform():
     decoder = _h3_shaped_decoder()
     latent = torch.randn(2, 4, 1, 2, 2, device="cuda", dtype=torch.float16)
     from sglang.kernels.ops import diffusion as diffusion_ops
@@ -359,6 +361,7 @@ def test_fused_decoder_is_disabled_off_nvidia():
         torch.autocast("cuda", dtype=torch.float16),
         set_forward_context(current_timestep=0, attn_metadata=None),
         mock.patch(f"{vae_dir}.vae_vit.current_platform.is_cuda", return_value=False),
+        mock.patch(f"{vae_dir}.vae_vit.current_platform.is_rocm", return_value=False),
         mock.patch.object(diffusion_ops, "h3_vae_scale_add_rmsnorm") as scale_add,
     ):
         decoder(latent)
