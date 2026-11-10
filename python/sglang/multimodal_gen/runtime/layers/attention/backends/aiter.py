@@ -283,6 +283,8 @@ class AITerImpl(AttentionImpl):
     Implementation of attention using AITemplate.
     """
 
+    accepts_strided_qkv = True
+
     @classmethod
     def has_native_varlen_kernel(cls) -> bool:
         return True
